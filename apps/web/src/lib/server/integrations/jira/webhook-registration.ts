@@ -25,6 +25,11 @@ export async function registerJiraWebhook(
   url.searchParams.set('token', secret)
   const authenticatedCallbackUrl = url.toString()
 
+  // Jira allows only one REST-registered webhook URL per OAuth app/user. If a previous
+  // registration is still around (e.g. an earlier disable failed to clean up, or the URL
+  // changed), POST returns "Only a single URL per user is allowed". Sweep first.
+  await deleteAllJiraWebhooksForApp(accessToken, cloudId)
+
   const response = await fetch(`https://api.atlassian.com/ex/jira/${cloudId}/rest/api/3/webhook`, {
     method: 'POST',
     headers: {
@@ -78,4 +83,37 @@ export async function deleteJiraWebhook(
     },
     body: JSON.stringify({ webhookIds: [Number(webhookId)] }),
   })
+}
+
+/**
+ * List then delete every REST-registered webhook owned by this OAuth app.
+ * Called from registerJiraWebhook to recover from leftover registrations.
+ * Best-effort: errors are logged and swallowed so the caller can still attempt POST.
+ */
+async function deleteAllJiraWebhooksForApp(accessToken: string, cloudId: string): Promise<void> {
+  try {
+    const listRes = await fetch(`https://api.atlassian.com/ex/jira/${cloudId}/rest/api/3/webhook`, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' },
+    })
+    if (!listRes.ok) return
+
+    const list = (await listRes.json()) as { values?: Array<{ id?: number }> }
+    const ids = (list.values ?? [])
+      .map((w) => w.id)
+      .filter((id): id is number => typeof id === 'number')
+    if (ids.length === 0) return
+
+    await fetch(`https://api.atlassian.com/ex/jira/${cloudId}/rest/api/3/webhook`, {
+      method: 'DELETE',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ webhookIds: ids }),
+    })
+  } catch (err) {
+    console.warn('[Jira] Failed to sweep existing webhooks:', err)
+  }
 }

@@ -18,6 +18,8 @@ export interface JiraConfig {
   siteUrl?: string
   issueTypeId?: string
   rootUrl: string
+  /** Optional map of board slug → Jira labels. If absent, the post's boardSlug is used as the sole label. */
+  boardLabelMap?: Record<string, string[]>
 }
 
 async function jiraApi(
@@ -56,6 +58,7 @@ export const jiraHook: HookHandler = {
       siteUrl,
       issueTypeId: configIssueTypeId,
       rootUrl,
+      boardLabelMap,
     } = config as JiraConfig
     const [projectId, parsedIssueTypeId] = (channelId ?? '').split(':')
     const issueTypeId = configIssueTypeId || parsedIssueTypeId
@@ -72,12 +75,19 @@ export const jiraHook: HookHandler = {
 
     const { title, description } = buildJiraIssueBody(event, rootUrl)
 
+    // Derive Jira labels from the source board so multi-product workspaces can
+    // filter/JQL by product in a single Jira project. Defaults to [boardSlug];
+    // boardLabelMap (optional, set via integrations.config) overrides per board.
+    const boardSlug = event.data.post.boardSlug
+    const labels = boardSlug ? (boardLabelMap?.[boardSlug] ?? [boardSlug]) : []
+
     const issueBody: Record<string, unknown> = {
       fields: {
         project: { id: projectId },
         summary: title,
         description,
         ...(issueTypeId ? { issuetype: { id: issueTypeId } } : {}),
+        ...(labels.length > 0 ? { labels } : {}),
       },
     }
 

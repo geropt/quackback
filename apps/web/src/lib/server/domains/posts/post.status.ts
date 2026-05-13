@@ -9,6 +9,7 @@ import { type PostId, type StatusId, type UserId, type PrincipalId } from '@quac
 import { dispatchPostStatusChanged, buildEventActor } from '@/lib/server/events/dispatch'
 import { NotFoundError } from '@/lib/shared/errors'
 import { createActivity } from '@/lib/server/domains/activity/activity.service'
+import { maybeCreateDraftChangelogForPost } from '@/lib/server/domains/changelog/changelog.auto'
 import type { ChangeStatusResult } from './post.types'
 
 /**
@@ -84,6 +85,15 @@ export async function changeStatus(
     previousStatusName,
     newStatus.name
   )
+
+  try {
+    await maybeCreateDraftChangelogForPost(postId, newStatus.category, {
+      principalId: actor.principalId,
+      displayName: actor.displayName,
+    })
+  } catch (err) {
+    console.error('[post.status] auto-changelog failed', err)
+  }
 
   createActivity({
     postId,

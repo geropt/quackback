@@ -49,11 +49,13 @@ export async function registerJiraWebhook(
   }
 
   const result = (await response.json()) as {
-    webhookRegistrationResult?: Array<{ createdWebhookId?: number }>
+    webhookRegistrationResult?: Array<{ createdWebhookId?: number; errors?: string[] }>
   }
-  const webhookId = result.webhookRegistrationResult?.[0]?.createdWebhookId
+  const first = result.webhookRegistrationResult?.[0]
+  const webhookId = first?.createdWebhookId
   if (!webhookId) {
-    throw new Error('No webhook ID returned from Jira')
+    const detail = first?.errors?.join('; ') ?? JSON.stringify(result)
+    throw new Error(`Jira webhook registration failed: ${detail}`)
   }
 
   return { webhookId: String(webhookId) }

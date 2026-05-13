@@ -16,9 +16,15 @@ export async function registerJiraWebhook(
   accessToken: string,
   cloudId: string,
   callbackUrl: string,
-  _secret: string,
+  secret: string,
   projectKey: string
 ): Promise<JiraWebhookResult> {
+  // Jira Cloud REST-registered webhooks don't support HMAC payload signing for OAuth apps,
+  // so we authenticate inbound requests via a shared secret in the URL query string.
+  const url = new URL(callbackUrl)
+  url.searchParams.set('token', secret)
+  const authenticatedCallbackUrl = url.toString()
+
   const response = await fetch(`https://api.atlassian.com/ex/jira/${cloudId}/rest/api/3/webhook`, {
     method: 'POST',
     headers: {
@@ -27,7 +33,7 @@ export async function registerJiraWebhook(
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      url: callbackUrl,
+      url: authenticatedCallbackUrl,
       webhooks: [
         {
           jqlFilter: `project = "${projectKey}"`,

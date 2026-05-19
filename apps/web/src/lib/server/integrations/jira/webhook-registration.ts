@@ -16,8 +16,20 @@ export async function registerJiraWebhook(
   accessToken: string,
   cloudId: string,
   callbackUrl: string,
-  _secret: string
+  secret: string,
+  projectKey: string
 ): Promise<JiraWebhookResult> {
+  // Jira Cloud REST-registered webhooks don't support HMAC payload signing for OAuth apps,
+  // so we authenticate inbound requests via a shared secret in the URL query string.
+  const url = new URL(callbackUrl)
+  url.searchParams.set('token', secret)
+  const authenticatedCallbackUrl = url.toString()
+
+  // Jira allows only one REST-registered webhook URL per OAuth app/user. If a previous
+  // registration is still around (e.g. an earlier disable failed to clean up, or the URL
+  // changed), POST returns "Only a single URL per user is allowed". Sweep first.
+  await deleteAllJiraWebhooksForApp(accessToken, cloudId)
+
   const response = await fetch(`https://api.atlassian.com/ex/jira/${cloudId}/rest/api/3/webhook`, {
     method: 'POST',
     headers: {
@@ -26,10 +38,10 @@ export async function registerJiraWebhook(
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      url: callbackUrl,
+      url: authenticatedCallbackUrl,
       webhooks: [
         {
-          jqlFilter: 'project is not EMPTY',
+          jqlFilter: `project = "${projectKey}"`,
           events: ['jira:issue_updated'],
         },
       ],
@@ -42,11 +54,13 @@ export async function registerJiraWebhook(
   }
 
   const result = (await response.json()) as {
-    webhookRegistrationResult?: Array<{ createdWebhookId?: number }>
+    webhookRegistrationResult?: Array<{ createdWebhookId?: number; errors?: string[] }>
   }
-  const webhookId = result.webhookRegistrationResult?.[0]?.createdWebhookId
+  const first = result.webhookRegistrationResult?.[0]
+  const webhookId = first?.createdWebhookId
   if (!webhookId) {
-    throw new Error('No webhook ID returned from Jira')
+    const detail = first?.errors?.join('; ') ?? JSON.stringify(result)
+    throw new Error(`Jira webhook registration failed: ${detail}`)
   }
 
   return { webhookId: String(webhookId) }
@@ -69,4 +83,37 @@ export async function deleteJiraWebhook(
     },
     body: JSON.stringify({ webhookIds: [Number(webhookId)] }),
   })
+}
+
+/**
+ * List then delete every REST-registered webhook owned by this OAuth app.
+ * Called from registerJiraWebhook to recover from leftover registrations.
+ * Best-effort: errors are logged and swallowed so the caller can still attempt POST.
+ */
+async function deleteAllJiraWebhooksForApp(accessToken: string, cloudId: string): Promise<void> {
+  try {
+    const listRes = await fetch(`https://api.atlassian.com/ex/jira/${cloudId}/rest/api/3/webhook`, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${accessToken}`, Accept: 'application/json' },
+    })
+    if (!listRes.ok) return
+
+    const list = (await listRes.json()) as { values?: Array<{ id?: number }> }
+    const ids = (list.values ?? [])
+      .map((w) => w.id)
+      .filter((id): id is number => typeof id === 'number')
+    if (ids.length === 0) return
+
+    await fetch(`https://api.atlassian.com/ex/jira/${cloudId}/rest/api/3/webhook`, {
+      method: 'DELETE',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ webhookIds: ids }),
+    })
+  } catch (err) {
+    console.warn('[Jira] Failed to sweep existing webhooks:', err)
+  }
 }

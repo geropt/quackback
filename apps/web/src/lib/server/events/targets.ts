@@ -231,7 +231,7 @@ async function getIntegrationTargets(
     targets.push({
       type: m.integrationType,
       target: { channelId },
-      config: { accessToken, rootUrl: context.portalBaseUrl },
+      config: { ...integrationConfig, accessToken, rootUrl: context.portalBaseUrl },
     })
   }
 

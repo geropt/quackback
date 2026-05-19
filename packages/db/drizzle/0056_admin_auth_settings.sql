@@ -13,7 +13,7 @@ ALTER TABLE "principal" ADD COLUMN "last_sso_sign_in_at" timestamp with time zon
 -- mismatch (defense-in-depth backstop for the Redis pub/sub
 -- `auth:config-invalidate` channel). Mutated only via atomic
 -- `auth_config_version + 1` to avoid lost updates.
-ALTER TABLE "settings" ADD COLUMN "auth_config_version" integer NOT NULL DEFAULT 0;
+ALTER TABLE "settings" ADD COLUMN IF NOT EXISTS "auth_config_version" integer NOT NULL DEFAULT 0;
 
 -- user.two_factor_enabled: per-user flag set by Better-Auth's twoFactor
 -- plugin on a successful TOTP verify.

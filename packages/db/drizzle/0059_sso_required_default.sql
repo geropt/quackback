@@ -1,3 +1,10 @@
+-- Idempotent: some deployments have `settings` without `auth_config_version`
+-- (skipped/partial forks, restores, drift). Later statements bump that column,
+-- mirroring migration 0056_admin_auth_settings.
+ALTER TABLE "settings" ADD COLUMN IF NOT EXISTS "auth_config_version" integer NOT NULL DEFAULT 0;
+
+--> statement-breakpoint
+
 -- Backfill authConfig.ssoOidc.required=false for tenants that have an
 -- ssoOidc block but no required key. Behaviour-preserving: the new
 -- isHardBound predicate already treats a missing key as false. The
